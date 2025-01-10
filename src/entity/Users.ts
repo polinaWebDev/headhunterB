@@ -30,7 +30,7 @@ export class Users {
     @Column({ nullable: true })
     avatar: string;
 
-    @OneToMany(() => Message, (message) => message.sender) // Используйте поле sender для связи
+    @OneToMany(() => Message, (message) => message.senderUser) // Используйте поле sender для связи
     sentMessages: Message[];
 
 

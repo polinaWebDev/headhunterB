@@ -1,6 +1,7 @@
-import {Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn} from "typeorm";
+import {Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, JoinColumn} from "typeorm";
 import { Chat } from "./Chat";
 import {Users} from "./Users";
+import {Company} from "./Company";
 
 @Entity()
 export class Message {
@@ -10,13 +11,16 @@ export class Message {
     @Column()
     content: string;
 
-    @ManyToOne(() => Users, (user) => user.sentMessages, { eager: true })
-    sender: Users;
-
-
     @CreateDateColumn()
     createdAt: Date;
 
-    @ManyToOne(() => Chat, (chat) => chat.messages, { onDelete: 'CASCADE' }) // Добавлено onDelete: 'CASCADE'
+    @ManyToOne(() => Users, (user) => user.sentMessages, { nullable: true })
+    senderUser: Users | null;
+
+    @ManyToOne(() => Company, (company) => company.sentMessages, { nullable: true })
+    @JoinColumn({ name: 'senderCompanyId'})
+    senderCompany: Company | null;
+
+    @ManyToOne(() => Chat, (chat) => chat.messages)
     chat: Chat;
 }

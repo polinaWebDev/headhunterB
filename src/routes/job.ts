@@ -119,6 +119,7 @@ router.put('/job/:jobId', checkAuth, async (req: AuthenticatedRequest, res) => {
                 return;
             }
 
+
             const isManagerOrOwner =
                 req.user.id === job.company.owner.id ||
                 job.company.members.some((member) => member.user.id === req.user?.id && member.role === 'manager');

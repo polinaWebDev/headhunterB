@@ -32,4 +32,6 @@ export class Company {
     @OneToMany(() => Chat, (chat) => chat.company)
     chats: Chat[];
 
+    @OneToMany(() => Message, (message) => message.senderCompany)
+    sentMessages: Message[];
 }

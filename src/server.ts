@@ -20,6 +20,8 @@ import { Chat } from "./entity/Chat";
 import chat from "./routes/chat";
 import {Message} from "./entity/Message";
 import {Users} from "./entity/Users";
+import {Company} from "./entity/Company";
+import {UserChat} from "./entity/UserChat";
 
 const app = express();
 const server = http.createServer(app);
@@ -67,28 +69,26 @@ AppDataSource.initialize()
 
                 const loadMessages = async () => {
                     try {
-
                         const messageRepository = AppDataSource.getRepository(Message);
 
                         const messages = await messageRepository.find({
                             where: { chat: { id: parseInt(chatId) } },
-                            relations: ["sender"],
+                            relations: ["senderUser", "senderCompany"],
                             order: { createdAt: "ASC" },
                         });
 
-                        console.log(messages);
 
-
-
-                        socket.emit("loadMessages", messages.map((message) => ({
+                        const formattedMessages = messages.map((message) => ({
                             content: message.content,
                             createdAt: message.createdAt,
-                            sender: {
-                                id: message.sender.id,
-                                name: message.sender.name,
-                            },
-                        })));
+                            sender: message.senderUser
+                                ? { id: message.senderUser.id, name: message.senderUser.name, type: "user" }
+                                : message.senderCompany
+                                    ? { id: message.senderCompany?.company_id, name: message.senderCompany?.name, type: "company" }
+                                    : { id: "unknown", name: "Unknown Sender", type: "unknown" },
+                        }));
 
+                        socket.emit("loadMessages", formattedMessages);
                     } catch (error) {
                         console.error("Ошибка при загрузке сообщений:", error);
                     }
@@ -98,37 +98,72 @@ AppDataSource.initialize()
             });
 
             socket.on("sendMessage", async (data) => {
-                const { chatId, content, senderId } = data;
+                const { chatId, content, senderId, type } = data;
 
                 try {
                     const chatRepository = AppDataSource.getRepository(Chat);
-                    const chat = await chatRepository.findOne({ where: { id: parseInt(chatId) } });
-                    const userRepository = AppDataSource.getRepository(Users);
-                    const sender = await userRepository.findOne({ where: { id: senderId } });
+                    let chat = await chatRepository.findOne({ where: { id: parseInt(chatId) } });
 
-                    if (!chat ) {
-                        console.error("Чат не найдены.");
-                        return;
+                    if (!chat) {
+                        const userRepository = AppDataSource.getRepository(Users);
+                        const companyRepository = AppDataSource.getRepository(Company);
+
+                        const user = await userRepository.findOne({ where: { id: senderId } });
+                        const company = await companyRepository.findOne({ where: { company_id: senderId } });
+
+                        if (!user || !company) {
+                            console.error("Пользователь или компания не найдены.");
+                            return;
+                        }
+
+                        // Создаем новый чат, если его нет
+                        chat = new Chat();
+                        chat.user = user;
+                        chat.company = company;
+                        await chatRepository.save(chat);
+
+                        // Отправляем событие на клиент
+                        socket.emit("newChat", { chatId: chat.id, userId: user.id });
+
+                        // Создаем записи в UserChat для пользователя и компании
+                        const userChatRepository = AppDataSource.getRepository(UserChat);
+                        const userChatUser = new UserChat();
+                        userChatUser.user = user;
+                        userChatUser.chat = chat;
+                        await userChatRepository.save(userChatUser);
+
+                        const userChatCompany = new UserChat();
+                        userChatCompany.user = company.owner; // Владелец компании — это пользователь
+                        userChatCompany.chat = chat;
+                        await userChatRepository.save(userChatCompany);
                     }
 
-                    if (!sender) {
-                        console.error('Отправитель не найден')
-                        return;
-                    }
-
+                    // Далее добавляем сообщение в чат
                     const messageRepository = AppDataSource.getRepository(Message);
-
                     const newMessage = new Message();
                     newMessage.content = content;
                     newMessage.chat = chat;
-                    newMessage.sender = sender;
+
+                    if (type === "user") {
+                        const userRepository = AppDataSource.getRepository(Users);
+                        const sender = await userRepository.findOne({ where: { id: senderId } });
+                        newMessage.senderUser = sender;
+                    } else if (type === "company") {
+                        const companyRepository = AppDataSource.getRepository(Company);
+                        const sender = await companyRepository.findOne({ where: { company_id: senderId } });
+                        newMessage.senderCompany = sender;
+                    }
+
                     await messageRepository.save(newMessage);
 
-                    // Отправляем сообщение всем в комнате chat-chatId
                     io.to(`chat-${chatId}`).emit("receiveMessage", {
                         content: newMessage.content,
-                        createdAt: newMessage.createdAt, // Убедитесь, что createdAt инициализирован
-                        sender: { id: sender.id, name: sender.name },
+                        createdAt: newMessage.createdAt,
+                        sender: {
+                            id: type === "user" ? newMessage.senderUser?.id : newMessage.senderCompany?.company_id,
+                            type: type,
+                            name: type === "user" ? newMessage.senderUser?.name : newMessage.senderCompany?.name,
+                        },
                     });
                 } catch (error) {
                     console.error("Ошибка при сохранении сообщения:", error);
